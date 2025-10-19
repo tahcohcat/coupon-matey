@@ -1,0 +1,28 @@
+Flask==2.3.3
+Flask-CORS==4.0.0
+Flask-SQLAlchemy==3.0.5
+Flask-JWT-Extended==4.5.2
+python-dotenv==1.0.0
+requests==2.31.0
+SQLAlchemy==2.0.21
+Werkzeug==2.3.7
+gunicorn==21.2.0
+
+# For Google OAuth integration (optional)
+google-auth==2.23.0
+google-auth-httplib2==0.1.1
+google-auth-oauthlib==1.1.0
+google-api-python-client==2.100.0
+
+# For enhanced OCR providers (optional)
+pytesseract==0.3.10
+Pillow==10.1.0
+opencv-python==4.8.1.78
+
+# For database migrations (optional)
+Flask-Migrate==4.0.5
+alembic==1.12.0
+
+# For production deployment (optional)
+psycopg2-binary==2.9.7  # PostgreSQL support
+python-dateutil==2.8.2

@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CouponSnap - Scan & Manage Your Coupons</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        #root {
+            width: 100%;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script>
+        const { useState, useRef, useEffect } = React;
+
+        // Icon Components
+        const Camera = ({ size = 24 }) => (
+            React.createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                React.createElement('path', { d: 'M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z' }),
+                React.createElement('circle', { cx: '12', cy: '13', r: '4' })
+            )
+        );
+
+        const Settings = ({ size = 24 }) => (
+            React.createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                React.createElement('circle', { cx: '12', cy: '12', r: '3' }),
+                React.createElement('path', { d: 'M12 1v6m0 6v6M4.22 4.22l4.24 4.24m2.12 2.12l4.24 4.24M1 12h6m6 0h6m-16.78 7.78l4.24-4.24m2.12-2.12l4.24-4.24' })
+            )
+        );
+
+        const LogOut = ({ size = 24 }) => (
+            React.createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                React.createElement('path', { d: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4' }),
+                React.createElement('polyline', { points: '16 17 21 12 16 7' }),
+                React.createElement('line', { x1: '21', y1: '12', x2: '9', y2: '12' })
+            )
+        );
+
+        const Plus = ({ size = 24 }) => (
+            React.createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                React.createElement('line', { x1: '12', y1: '5', x2: '12', y2: '19' }),
+                React.createElement('line', { x1: '5', y1: '12', x2: '19', y2: '12' })
+            )
+        );
+
+        const Check = ({ size = 24 }) => (
+            React.createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                React.createElement('polyline', { points: '20 6 9 17 4 12' })
+            )
+        );
+
+        const X = ({ size = 24 }) => (
+            React.createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                React.createElement('line', { x1: '18', y1: '6', x2: '6', y2: '18' }),
+                React.createElement('line', { x1: '6', y1: '6', x2: '18', y2: '18' })
+            )
+        );
+
+        const Clock = ({ size = 24 }) => (
+            React.createElement('svg', { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2' },
+                React.createElement('circle', { cx: '12', cy: '12', r: '10' }),
+                React.createElement('polyline', { points: '12 6 12 12 16 14' })
+            )
+        );
+
+        // Main App Component
+        function CouponApp() {
+            const [user, setUser] = useState(null);
+            const [coupons, setCoupons] = useState([]);
+            const [settings, setSettings] = useState({
+                autoDeleteExpired: false,
+                autoDeleteClaimed: false,
+                notifyBeforeExpiry: 3,
+                syncGoogleCalendar: false,
+            });
+            const [view, setView] = useState('coupons');
+            const [loading, setLoading] = useState(false);
+            const [showSettings, setShowSettings] = useState(false);
+            const videoRef = useRef(null);
+
+            useEffect(() => {
+                if (window.google) {
+                    window.google.accounts.id.initialize({
+                        client_id: 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com',
+                        callback: handleGoogleSignIn,
+                    });
+                }
+            }, []);
+
+            const handleGoogleSignIn = async (response) => {
+                try {
+                    const res = await fetch('http://localhost:5000/api/auth/google', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id_token: response.credential }),
+                    });
+
+                    if (res.ok) {
+                        const data = await res.json();
+                        setUser(data.user);
+                        localStorage.setItem('access_token', data.access_token);
+                        loadCoupons(data.access_token);
+                    }
+                } catch (error) {
+                    console.error('Login error:', error);
+                    alert('Login failed. Using demo mode.');
+                    setUser({ id: 'demo', email: 'demo@example.com', name: 'Demo User' });
+                    loadMockCoupons();
+                }
+            };
+
+            const loadCoupons = async (token) => {
+                try {
+                    const res = await fetch('http://localhost:5000/api/coupons', {
+                        headers: { 'Authorization': `Bearer ${token}` },
+                    });
+                    if (res.ok) {
+                        const data = await res.json();
+                        setCoupons(data);
+                    }
+                } catch (error) {
+                    console.error('Error loading coupons:', error);
+                }
+            };
+
+            const loadMockCoupons = () => {
+                setCoupons([
+                    {
+                        id: '1',
+                        code: 'SAVE20',
+                        title: 'Save 20% on Electronics',
+                        provider: 'TechStore',
+                        discount: '20% off',
+                        expiryDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+                        deadline: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+                        terms: 'Valid on purchases over $50',
+                        claimed: false,
+                        scannedAt: new Date(),
+                    },
+                    {
+                        id: '2',
+                        code: 'EXPIRED10',
+                        title: 'Free Shipping',
+                        provider: 'ShopMart',
+                        discount: 'Free shipping',
+                        expiryDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000),
+                        deadline: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000),
+                        terms: 'On orders over $25',
+                        claimed: false,
+                        scannedAt: new Date(Date.now() - 10 * 24 * 60 * 60 * 1000),
+                    },
+                ]);
+            };
+
+            const handleCameraStart = async () => {
+                setView('camera');
+                setTimeout(() => {
+                    if (videoRef.current) {
+                        navigator.mediaDevices
+                            .getUserMedia({ video: { facingMode: 'environment' } })
+                            .then((stream) => {
+                                videoRef.current.srcObject = stream;
+                                videoRef.current.play().catch(e => console.error('Play error:', e));
+                            })
+                            .catch((err) => {
+                                console.error('Camera error:', err);
+                                console.error('Error name:', err.name);
+                                console.error('Error message:', err.message);
+
+                                let message = 'Camera access denied';
+                                if (err.name === 'NotFoundError') {
+                                    message = 'No camera found on device';
+                                } else if (err.name === 'NotAllowedError') {
+                                    message = 'Camera permission denied. Please allow camera access in browser settings.';
+                                } else if (err.name === 'NotReadableError') {
+                                    message = 'Camera is in use by another application';
+                                }
+
+                                alert(message + '\n\nTip: Make sure you\'re on http://localhost:8000 (not a random port)');
+                                setView('coupons');
+                            });
+                    }
+                }, 100);
+            };
+
+            const handleCapture = async () => {
+                if (videoRef.current && videoRef.current.srcObject) {
+                    setLoading(true);
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = videoRef.current.videoWidth;
+                        canvas.height = videoRef.current.videoHeight;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(videoRef.current, 0, 0);
+
+                        const imageBase64 = canvas.toDataURL('image/jpeg');
+                        let token = localStorage.getItem('access_token');
+
+                        if (!token) {
+                            alert('Not authenticated. Please log in first.');
+                            setLoading(false);
+                            return;
+                        }
+
+                        console.log('Sending capture to backend...');
+                        const res = await fetch('http://localhost:5000/api/coupons', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${token}`,
+                            },
+                            body: JSON.stringify({ image: imageBase64 }),
+                        });
+
+                        const responseText = await res.text();
+                        console.log('Response status:', res.status);
+                        console.log('Response:', responseText);
+
+                        if (res.ok) {
+                            const coupon = JSON.parse(responseText);
+                            setCoupons([coupon, ...coupons]);
+                            setView('coupons');
+                        } else {
+                            alert(`Error ${res.status}: ${responseText}`);
+                        }
+                    } catch (error) {
+                        console.error('Capture error:', error);
+                        alert('Error: ' + error.message + '\n\nMake sure backend is running on http://localhost:5000');
+                    }
+                    setLoading(false);
+                }
+            };
+
+            const handleToggleClaimed = (id) => {
+                setCoupons(coupons.map((c) => (c.id === id ? { ...c, claimed: !c.claimed } : c)));
+            };
+
+            const handleDeleteCoupon = (id) => {
+                setCoupons(coupons.filter((c) => c.id !== id));
+            };
+
+            const handleLogout = () => {
+                setUser(null);
+                setCoupons([]);
+                localStorage.removeItem('access_token');
+            };
+
+            const isExpired = (coupon) => new Date() > coupon.expiryDate;
+            const daysUntilExpiry = (coupon) => {
+                const days = Math.ceil((coupon.expiryDate - new Date()) / (1000 * 60 * 60 * 24));
+                return days;
+            };
+
+            const activeCoupons = coupons.filter((c) => !isExpired(c) && !c.claimed).length;
+            const expiredCoupons = coupons.filter((c) => isExpired(c)).length;
+
+            if (!user) {
+                return React.createElement('div', { className: 'h-screen w-full bg-gradient-to-br from-blue-600 to-blue-800 flex items-center justify-center' },
+                    React.createElement('div', { className: 'text-center text-white' },
+                        React.createElement(Camera, { size: 64 }),
+                        React.createElement('h1', { className: 'text-4xl font-bold mb-2 mt-4' }, 'CouponSnap'),
+                        React.createElement('p', { className: 'text-xl mb-8' }, 'Scan & Manage Your Coupons'),
+                        React.createElement('div', { id: 'google_signin_button', className: 'flex justify-center mb-6' }),
+                        React.createElement('button', {
+                            onClick: () => {
+                                setUser({ id: 'demo', email: 'demo@example.com', name: 'Demo User' });
+                                loadMockCoupons();
+                            },
+                            className: 'mt-6 px-6 py-2 bg-blue-500 rounded-lg font-semibold hover:bg-blue-600'
+                        }, 'Enter Demo Mode')
+                    )
+                );
+            }
+
+            return React.createElement('div', { className: 'h-screen bg-gray-50 flex flex-col pb-20' },
+                // Header
+                React.createElement('div', { className: 'bg-white border-b sticky top-0 z-10' },
+                    React.createElement('div', { className: 'max-w-4xl mx-auto px-4 py-4 flex justify-between items-center' },
+                        React.createElement('div', null,
+                            React.createElement('h1', { className: 'text-2xl font-bold text-gray-900' }, 'CouponSnap'),
+                            React.createElement('p', { className: 'text-sm text-gray-500' }, user.email)
+                        ),
+                        React.createElement('div', { className: 'flex gap-2' },
+                            React.createElement('button', {
+                                onClick: () => setShowSettings(!showSettings),
+                                className: 'p-2 hover:bg-gray-100 rounded-lg'
+                            }, React.createElement(Settings, { size: 24 })),
+                            React.createElement('button', {
+                                onClick: handleLogout,
+                                className: 'p-2 hover:bg-gray-100 rounded-lg'
+                            }, React.createElement(LogOut, { size: 24 }))
+                        )
+                    )
+                ),
+                // Settings Panel
+                showSettings && React.createElement('div', { className: 'bg-white border-b' },
+                    React.createElement('div', { className: 'max-w-4xl mx-auto px-4 py-4 space-y-4' },
+                        React.createElement('label', { className: 'flex items-center gap-3' },
+                            React.createElement('input', {
+                                type: 'checkbox',
+                                checked: settings.autoDeleteExpired,
+                                onChange: (e) => setSettings({ ...settings, autoDeleteExpired: e.target.checked }),
+                                className: 'w-4 h-4'
+                            }),
+                            React.createElement('span', null, 'Auto-delete expired coupons')
+                        ),
+                        React.createElement('label', { className: 'flex items-center gap-3' },
+                            React.createElement('input', {
+                                type: 'checkbox',
+                                checked: settings.autoDeleteClaimed,
+                                onChange: (e) => setSettings({ ...settings, autoDeleteClaimed: e.target.checked }),
+                                className: 'w-4 h-4'
+                            }),
+                            React.createElement('span', null, 'Auto-delete claimed coupons')
+                        ),
+                        React.createElement('label', { className: 'flex items-center gap-3' },
+                            React.createElement('input', {
+                                type: 'checkbox',
+                                checked: settings.syncGoogleCalendar,
+                                onChange: (e) => setSettings({ ...settings, syncGoogleCalendar: e.target.checked }),
+                                className: 'w-4 h-4'
+                            }),
+                            React.createElement('span', null, 'Sync with Google Calendar')
+                        ),
+                        React.createElement('div', null,
+                            React.createElement('label', { className: 'block text-sm mb-2' }, 'Notify before expiry (days)'),
+                            React.createElement('input', {
+                                type: 'number',
+                                value: settings.notifyBeforeExpiry,
+                                onChange: (e) => setSettings({ ...settings, notifyBeforeExpiry: parseInt(e.target.value) }),
+                                min: '1',
+                                className: 'border rounded px-3 py-2 w-full'
+                            })
+                        )
+                    )
+                ),
+                // Main Content
+                React.createElement('div', { className: 'flex-1 max-w-4xl w-full mx-auto px-4 py-6' },
+                    view === 'camera' ?
+                        React.createElement('div', { className: 'space-y-4' },
+                            React.createElement('video', {
+                                ref: videoRef,
+                                autoPlay: true,
+                                className: 'w-full rounded-lg bg-black'
+                            }),
+                            React.createElement('div', { className: 'flex gap-4' },
+                                React.createElement('button', {
+                                    onClick: () => setView('coupons'),
+                                    className: 'flex-1 bg-gray-500 text-white py-3 rounded-lg font-semibold hover:bg-gray-600'
+                                }, 'Cancel'),
+                                React.createElement('button', {
+                                    onClick: handleCapture,
+                                    disabled: loading,
+                                    className: 'flex-1 bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-gray-400'
+                                }, loading ? 'Processing...' : 'Capture')
+                            )
+                        )
+                        :
+                        React.createElement('div', { className: 'space-y-6' },
+                            // Stats
+                            React.createElement('div', { className: 'grid grid-cols-3 gap-4' },
+                                React.createElement('div', { className: 'bg-white p-4 rounded-lg border' },
+                                    React.createElement('p', { className: 'text-2xl font-bold text-blue-600' }, coupons.length),
+                                    React.createElement('p', { className: 'text-sm text-gray-600' }, 'Total Coupons')
+                                ),
+                                React.createElement('div', { className: 'bg-white p-4 rounded-lg border' },
+                                    React.createElement('p', { className: 'text-2xl font-bold text-green-600' }, activeCoupons),
+                                    React.createElement('p', { className: 'text-sm text-gray-600' }, 'Active')
+                                ),
+                                React.createElement('div', { className: 'bg-white p-4 rounded-lg border' },
+                                    React.createElement('p', { className: 'text-2xl font-bold text-red-600' }, expiredCoupons),
+                                    React.createElement('p', { className: 'text-sm text-gray-600' }, 'Expired')
+                                )
+                            ),
+                            // Coupons List
+                            React.createElement('div', { className: 'space-y-3' },
+                                coupons.length === 0 ?
+                                    React.createElement('div', { className: 'text-center py-12 bg-white rounded-lg border-2 border-dashed' },
+                                        React.createElement(Camera, { size: 48 }),
+                                        React.createElement('p', { className: 'text-gray-500 mt-2' }, 'No coupons yet. Start scanning!')
+                                    )
+                                    :
+                                    coupons.map((coupon) => {
+                                        const expired = isExpired(coupon);
+                                        return React.createElement('div', {
+                                            key: coupon.id,
+                                            className: `bg-white p-4 rounded-lg border ${expired ? 'opacity-60' : ''} ${coupon.claimed ? 'bg-gray-50' : ''}`
+                                        },
+                                            React.createElement('div', { className: 'flex justify-between items-start mb-2' },
+                                                React.createElement('div', { className: 'flex-1' },
+                                                    React.createElement('h3', { className: 'font-bold text-gray-900' }, coupon.title),
+                                                    React.createElement('p', { className: 'text-sm text-gray-600' }, coupon.provider)
+                                                ),
+                                                React.createElement('div', { className: 'text-right' },
+                                                    React.createElement('p', { className: 'font-mono font-bold text-blue-600' }, coupon.code),
+                                                    React.createElement('p', { className: 'text-sm font-semibold text-green-600' }, coupon.discount)
+                                                )
+                                            ),
+                                            React.createElement('p', { className: 'text-xs text-gray-600 mb-3' }, coupon.terms),
+                                            React.createElement('div', { className: 'flex gap-2 text-xs mb-3' },
+                                                expired && React.createElement('span', { className: 'bg-red-100 text-red-800 px-2 py-1 rounded' }, 'Expired'),
+                                                !expired && React.createElement('span', { className: 'bg-green-100 text-green-800 px-2 py-1 rounded flex items-center gap-1' },
+                                                    React.createElement(Clock, { size: 12 }),
+                                                    `${daysUntilExpiry(coupon)} days left`
+                                                ),
+                                                coupon.claimed && React.createElement('span', { className: 'bg-gray-200 text-gray-800 px-2 py-1 rounded' }, 'Claimed')
+                                            ),
+                                            React.createElement('div', { className: 'flex gap-2' },
+                                                React.createElement('button', {
+                                                    onClick: () => handleToggleClaimed(coupon.id),
+                                                    className: `flex-1 py-2 px-3 rounded text-sm font-semibold flex items-center justify-center gap-2 ${coupon.claimed ? 'bg-gray-200 text-gray-700 hover:bg-gray-300' : 'bg-blue-100 text-blue-700 hover:bg-blue-200'}`
+                                                },
+                                                    React.createElement(Check, { size: 16 }),
+                                                    coupon.claimed ? 'Mark Active' : 'Mark Claimed'
+                                                ),
+                                                React.createElement('button', {
+                                                    onClick: () => handleDeleteCoupon(coupon.id),
+                                                    className: 'py-2 px-3 rounded text-sm font-semibold bg-red-100 text-red-700 hover:bg-red-200'
+                                                }, React.createElement(X, { size: 16 }))
+                                            )
+                                        );
+                                    })
+                            )
+                        )
+                ),
+                // Floating Action Button
+                view === 'coupons' && React.createElement('button', {
+                    onClick: handleCameraStart,
+                    className: 'fixed bottom-8 right-8 bg-blue-600 text-white p-4 rounded-full shadow-lg hover:bg-blue-700 active:scale-95 transition'
+                }, React.createElement(Plus, { size: 32 }))
+            );
+        }
+
+        // Render Google button after component mounts
+        setTimeout(() => {
+            if (window.google) {
+                window.google.accounts.id.renderButton(
+                    document.getElementById('google_signin_button'),
+                    { theme: 'filled_blue', size: 'large' }
+                );
+            }
+        }, 500);
+
+        // Render app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(CouponApp));
+    </script>
+</body>
+</html>
